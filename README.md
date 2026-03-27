@@ -1,18 +1,18 @@
-# Contextuarize OntologyMapper Query
+# Contextualize OntologyMapper Query
 
-LLM-based CLI tool that summarizes cancer clinical metadata from a CSV file 
-using Claude. Each unique `source` entry gets a concise (&lt;25 token) summary 
-added as a `context` column.
+LLM-based CLI tool that summarizes cancer clinical metadata from a CSV file
+using Claude. Each unique `source` entry gets a clinical prose summary
+(under 450 WordPiece tokens, optimized for PubMedBERT embedding) added as a
+`context` column.
 
 ## Setup
 
 ```bash
 npm install
-cp .env.example .env
-# add your Anthropic API key to .env
 ```
 
-**.env**
+Create a `.env` file with your Anthropic API key:
+
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 ```
@@ -39,24 +39,24 @@ npm run cli -- data/tcga_clinical.csv
 
 ## Customizing the Prompt
 
-The summarization behavior is controlled by `SYSTEM_PROMPT` at the top of [cli.js](cli.js) (lines 8–12). It has two parts:
+The summarization behavior is controlled by `SYSTEM_PROMPT` at the top of [cli.js](cli.js) (lines 8–14). It instructs the model to:
 
-1. **Instruction text** — defines what to capture, the token budget, allowed abbreviations, and output format
-2. **Few-shot example** — an `Input:` / `Output:` pair that demonstrates the expected summary style; the model closely mirrors this
+- Write one-paragraph clinical case summaries in natural PubMed-style prose
+- Stay under 450 WordPiece tokens (for PubMedBERT's 512-token limit)
+- Spell out clinical terms as they appear in published literature, using only standard PubMed abbreviations
+- Prioritize: cancer type/subtype, staging, demographics, biomarkers, treatment, and outcome
 
-To change the prompt, edit `SYSTEM_PROMPT` directly:
+To change the prompt, edit `SYSTEM_PROMPT` directly in `cli.js`.
 
-```js
-const SYSTEM_PROMPT = `You are a clinical metadata summarizer. Given semicolon-delimited ...
-// ↑ edit the instruction text
+## Building the RAG Index
 
-Example:
-Input: "..."
-Output: "..."   // ← update this to reflect your desired output style
-`;
+`build_rag_index.py` populates the `rag_disease` SQLite table and builds a PubMedBERT FAISS index from a disease corpus CSV. Run from the MetaHarmonizer root:
+
+```bash
+python /path/to/build_rag_index.py
 ```
 
-The few-shot example has the strongest influence on output style — update it whenever you change the token budget, field priority, or abbreviation conventions.
+This reads `data/corpus/cbio_disease/disease_corpus_updated.csv` and writes to `src/KnowledgeDb/vector_db.sqlite` and `src/KnowledgeDb/faiss_indexes/rag_pubmed_bert_disease.index`. Paths are configurable via `VECTOR_DB_PATH` and `FAISS_INDEX_DIR` environment variables.
 
 ## Context Embedding Evaluation
 
@@ -95,8 +95,8 @@ python om_with_context.py -i my_data.csv --skip-method2 --skip-plots
 
 ## Output
 
-The output CSV is the input with one added `context` column, e.g.:
+The CLI output CSV is the input with one added `context` column containing clinical prose, e.g.:
 
 | source | ... | context |
 |--------|-----|---------|
-| 58M, PRAD T3b/M0, Gleason 9, complete remission | ... | 58M, prostate adenocarcinoma (PRAD), Gleason 9 (4+5+3), T3b/M0, living & tumor-free at 53mo |
+| `AGE:58; CANCER_TYPE:PRAD; T_STAGE:T3b; ...` | ... | A 58-year-old male diagnosed with prostate adenocarcinoma, pathological stage pT3b with no distant metastasis. Gleason score 9 (4+5). The patient achieved complete remission and was living and tumor-free at 53 months follow-up. |
